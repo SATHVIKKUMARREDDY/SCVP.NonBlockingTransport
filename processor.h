@@ -12,6 +12,9 @@
 #include <tlm.h>
 #include <tlm_utils/tlm_quantumkeeper.h>
 
+#define QUANTAM    // Comment this line if you don't want to use quantum keeper
+
+
 
 class processor : public sc_module, tlm::tlm_bw_transport_if<>
 {
@@ -25,6 +28,10 @@ private:
 
 public:
 	tlm::tlm_initiator_socket<> iSocket;
+
+#ifdef QUANTAM
+	tlm_utils::tlm_quantumkeeper quantum;
+#endif
 
 	processor(sc_module_name, std::string pathToTrace, sc_time cycleTime);
 
@@ -50,9 +57,15 @@ processor::processor(sc_module_name, std::string pathToFile, sc_time cycleTime) 
 	if (!file.is_open())
 		SC_REPORT_FATAL(name(), "Could not open trace");
 
-    SC_THREAD(processTrace);
-
 	iSocket.bind(*this);
+
+#ifdef QUANTAM	
+	SC_THREAD(processRandom);
+	quantum.set_global_quantum(sc_time(1000, SC_NS));
+	quantum.reset();
+#else
+	SC_THREAD(processTrace);
+#endif
 }
 
 // Use the command below in a termial to get your gcc version.
@@ -220,9 +233,11 @@ void processor::processRandom()
     trans.set_data_length(4);
     trans.set_command(tlm::TLM_WRITE_COMMAND);
     trans.set_data_ptr(data);
+	cout<< "Starting random transactions from " << name() << endl;
 
     for (uint64_t transId = 0; transId < 100000000; transId++)
     {
+		cout<< name() << " issuing transaction " << transId << endl;
         cycles = distrCycle(randGenerator);
         address = distrAddr(randGenerator);
 
@@ -231,7 +246,17 @@ void processor::processRandom()
         trans.set_address(address);
         iSocket->b_transport(trans, delay);
 
-        wait(delay);
+#ifdef QUANTAM
+			delay += quantum.get_local_time();
+            quantum.set(delay); // Anotate the time of the target
+            if(quantum.need_sync())
+			{
+				quantum.sync();
+			}
+#else
+            wait(delay);
+#endif
+
     }
 
     // End Simulation because there are no events.
